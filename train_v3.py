@@ -25,7 +25,8 @@ import glob
 
 
 def pitch_augment_batch(f0, log_melspc, wav, uv, mask, cfg,
-                        mel_sr, mel_nfft, mel_hop, mel_win, mel_dim, mel_fmin, mel_fmax):
+                        mel_sr, mel_nfft, mel_hop, mel_win, mel_dim, mel_fmin, mel_fmax,
+                        mel_format='diffsinger'):
     """RefineGAN流 pitch augmentation(per-batch, GPU on-the-fly)。確率 pitch_aug_prob で
     バッチ全体を単一 r=2^(ζ/12) でピッチシフト。リサンプルで 新F0=旧F0×r(RMVPE不要)、mel は
     リサンプル波形から wav_to_mel_torch で再計算(preprocess 一致)。既定OFF or 非発動で現行と完全一致。
@@ -56,7 +57,9 @@ def pitch_augment_batch(f0, log_melspc, wav, uv, mask, cfg,
     new_wav = new_wav[..., :Tf_new * mel_hop]
     # 2) mel 再計算(GPU, preprocess 一致)。[B,M,Tf_new] -> [B,Tf_new,M]
     new_mel = wav_to_mel_torch(new_wav, mel_sr, mel_nfft, mel_hop, mel_win,
-                               mel_dim, mel_fmin, mel_fmax).transpose(1, 2)
+                               mel_dim, mel_fmin, mel_fmax, mel_format).transpose(1, 2)
+    # nnsvs 形式(center=True)は 1 + T // hop フレーム出るので、波形に合わせて Tf_new に揃える
+    new_mel = new_mel[:, :Tf_new]
 
     # f0/uv は frame 解像度([B,1,Tf])→ Tf_new フレームへ。mask は sample 解像度
     # ([B,Ts], get_mask_from_lengths=wav長)→ Ts_new サンプルへ(別解像度)。
@@ -357,6 +360,12 @@ def _log_linear_spec(npz_path, wav, writer, epoch, cfg, basename):
         print(f"  [linear_spec] error {basename}: {e}")
 
 
+def _mel_diff_vmax(cfg):
+    """mel_diff プロットの色の範囲。ln-mel は 5.0、log10-mel(nnsvs)は同じ幅の 5.0/ln(10)。"""
+    fmt = cfg['preprocess'].get('mel_format')
+    return {'diffsinger': 5.0, 'nnsvs': 5.0 / np.log(10.0)}.get(fmt, 20.0)
+
+
 def inference(model, npz_path, device, cfg, disable_uv=False):
     """disable_uv=True で v/uv hard gate を無効化(uv=0=全 voiced 扱い)して生成する。
     無声区間で harmonic 源が gate されなくなるので、ccep フィルタが自力で harmonic を
@@ -404,6 +413,13 @@ def inference(model, npz_path, device, cfg, disable_uv=False):
         with np.errstate(divide='ignore', over='ignore', invalid='ignore'):
             _mel = mel_basis.astype(np.float64) @ np.abs(x_stft)
         fake_mel = np.log(np.maximum(1e-5, _mel)).T.astype(np.float32)
+    elif p_cfg.get('mel_format') == 'nnsvs':
+        # preprocess_nnsvs(logmelfilterbank)と同一計算。float64 で数値も一致する。
+        fake_mel = wav_to_mel_torch(
+            torch.from_numpy(synthesized.astype(np.float64))[None], p_cfg['sample_rate'],
+            p_cfg['fft_size'], p_cfg['hop_size'], p_cfg.get('win_size', p_cfg['fft_size']),
+            p_cfg['mel_dim'], p_cfg['mel_min'], p_cfg['mel_max'], 'nnsvs',
+        )[0].T.numpy().astype(np.float32)
     else:  # V2 互換（power_to_db）
         S_fake = librosa.feature.melspectrogram(
             y=synthesized,
@@ -507,7 +523,7 @@ def inference_pinpoint_files(model, device, writer, epoch, cfg, logged_real_mels
         diff = fake_mel_plot[:min_T] - real_mel[:min_T]  # (T, mel_dim)
         writer.add_figure('mel_diff/' + basename,
                           plot_mel_diff(diff.T, title=f"diff: {basename}  ep{epoch}",
-                                        vmax=(5.0 if cfg['preprocess'].get('mel_format') == 'diffsinger' else 20.0)), epoch)
+                                        vmax=_mel_diff_vmax(cfg)), epoch)
 
         _log_disc_badness(discriminator, npz_path, wav, real_mel, device, writer, epoch, cfg, basename)
         _log_linear_spec(npz_path, wav, writer, epoch, cfg, basename)
@@ -557,7 +573,7 @@ def inference_test_data(model, device, writer, epoch, cfg, logged_real_mels: set
         diff = fake_mel_plot[:min_T] - real_mel[:min_T]  # (T, mel_dim)
         writer.add_figure('mel_diff/' + basename,
                           plot_mel_diff(diff.T, title=f"diff: {basename}  ep{epoch}",
-                                        vmax=(5.0 if cfg['preprocess'].get('mel_format') == 'diffsinger' else 20.0)), epoch)
+                                        vmax=_mel_diff_vmax(cfg)), epoch)
 
         _log_disc_badness(discriminator, npz_path, wav, real_mel, device, writer, epoch, cfg, basename)
         _log_linear_spec(npz_path, wav, writer, epoch, cfg, basename)
@@ -709,6 +725,8 @@ def run(args, force_restart: bool = False):
           f"{cfg['training']['batch_size'] * accum_steps})")
 
     hop_size = cfg['preprocess']['hop_size']
+    # nnsvs の log10-mel だけ明示。それ以外は従来どおり diffsinger_mel(=use_v3)で決まる。
+    dataset_mel_format = 'nnsvs' if cfg['preprocess'].get('mel_format') == 'nnsvs' else None
     amp_augment = cfg['training'].get('amp_augment', False)
     amp_aug_range = tuple(cfg['training'].get('amp_aug_range', [0.5, 2.0]))
     vuv_dropout_prob = cfg['training'].get('vuv_dropout_prob', 0.0)
@@ -718,7 +736,7 @@ def run(args, force_restart: bool = False):
         print(f"amp_augment: enabled, range={amp_aug_range}")
     train_dataset = VocoderDataset(dataset_dir=cfg['training']['train_dir'], hop_size=hop_size,
                                    augment=amp_augment, amp_aug_range=amp_aug_range,
-                                   diffsinger_mel=use_v3)
+                                   diffsinger_mel=use_v3, mel_format=dataset_mel_format)
     crop_frames = cfg['training'].get('crop_frames', cfg['training'].get('max_train_frames', None))
     min_crop_rms = float(cfg['training'].get('min_crop_rms', 0.0))   # 0 = disabled (near-silent crop rejection)
     collate_train = make_random_crop_collate(crop_frames, hop_size=hop_size, min_crop_rms=min_crop_rms)
@@ -741,7 +759,7 @@ def run(args, force_restart: bool = False):
             drop_last=True, pin_memory=True
         )
     test_dataset = VocoderDataset(dataset_dir=cfg['training']['test_dir'], hop_size=hop_size,
-                                  diffsinger_mel=use_v3)
+                                  diffsinger_mel=use_v3, mel_format=dataset_mel_format)
     test_loader = DataLoader(
         test_dataset, batch_size=1, shuffle=False,
         num_workers=cfg['training']['num_workers'], collate_fn=collate_fn_padd
@@ -892,8 +910,12 @@ def run(args, force_restart: bool = False):
     mel_sr, mel_nfft, mel_hop = _pp['sample_rate'], _pp['fft_size'], _pp['hop_size']
     mel_win = _pp.get('win_size', _pp['fft_size'])
     mel_dim, mel_fmin, mel_fmax = _pp['mel_dim'], _pp['mel_min'], _pp['mel_max']
+    # wav_to_mel_torch の形式。'nnsvs' 以外は従来の diffsinger(ln)計算。
+    mel_format = 'nnsvs' if _pp.get('mel_format') == 'nnsvs' else 'diffsinger'
+    mel_loss_floor = cfg['training'].get('mel_loss_floor', None)
     if mel_loss_scale > 0:
-        print(f"mel_loss: scale={mel_loss_scale} ({mel_sr}/{mel_nfft}/hop{mel_hop}/{mel_dim}bin)")
+        print(f"mel_loss: scale={mel_loss_scale} ({mel_sr}/{mel_nfft}/hop{mel_hop}/{mel_dim}bin, "
+              f"{mel_format}, floor={mel_loss_floor})")
 
     # スクリプト開始時に real(GT) のみ再プロット（vmin/vmax のスケール修正を反映）。
     # fake は未学習(zero-init で flat)なので出さない。fake は学習中の save_interval で記録される。
@@ -959,7 +981,7 @@ def run(args, force_restart: bool = False):
             # 発動時: wav をリサンプル→mel再計算→f0×r→uv/mask 時間ワープ(バッチ長が変動)。
             f0, log_melspc, wav, uv, mask = pitch_augment_batch(
                 f0, log_melspc, wav, uv, mask, cfg,
-                mel_sr, mel_nfft, mel_hop, mel_win, mel_dim, mel_fmin, mel_fmax)
+                mel_sr, mel_nfft, mel_hop, mel_win, mel_dim, mel_fmin, mel_fmax, mel_format)
 
             # v/uv dropout: 確率 vuv_dropout_prob で uv gate を無効化(全 voiced 扱い)。
             # 大半(1-p)は gate 有効で「無声区間で harmonic を鳴らさない」を学習(無声で
@@ -1122,7 +1144,8 @@ def run(args, force_restart: bool = False):
                     with torch.amp.autocast('cuda', enabled=False):
                         m_loss = mel_loss_fn(est_source_raw.float(), log_melspc.float(),
                                              mel_sr, mel_nfft, mel_hop, mel_win,
-                                             mel_dim, mel_fmin, mel_fmax, mask=mask)
+                                             mel_dim, mel_fmin, mel_fmax, mask=mask,
+                                             mel_format=mel_format, floor=mel_loss_floor)
                     loss_mel_epoch += m_loss.item()
                     total_loss = total_loss + m_loss * mel_loss_scale / accum_steps
                     del m_loss

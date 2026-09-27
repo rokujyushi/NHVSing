@@ -254,40 +254,69 @@ def _mel_basis_cached(sr: int, n_fft: int, n_mels: int, fmin: float, fmax: float
     return torch.from_numpy(mb).float()
 
 
+# nnsvs melf0(parallel_wavegan の logmelfilterbank)の log10 下限。
+NNSVS_MEL_EPS = 1e-10
+
+
 def wav_to_mel_torch(wav: Tensor, sr: int, n_fft: int, hop: int, win: int,
-                     n_mels: int, fmin: float, fmax: float) -> Tensor:
-    """波形 → diffsinger ln-mel。preprocess_singing_db.wav_to_mel と一致(center=False +
-    reflect pad (n_fft-hop)//2, hann, ln clamp 1e-5)。GPU/微分可能。mel_loss と
-    pitch_augment(リサンプル波形の mel 再計算)の単一情報源。
-    wav: [B, T] or [B, 1, T] → 返り [B, n_mels, frame]。"""
+                     n_mels: int, fmin: float, fmax: float,
+                     mel_format: str = 'diffsinger') -> Tensor:
+    """波形 → log-mel。GPU/微分可能。mel_loss と pitch_augment(リサンプル波形の mel 再計算)の
+    単一情報源。wav: [B, T] or [B, 1, T] → 返り [B, n_mels, frame]。
+
+    mel_format:
+      'diffsinger' … preprocess.make_mel_fn と一致(center=False + reflect pad (n_fft-hop)//2,
+                     hann, ln clamp 1e-5)。
+      'nnsvs'      … nnsvs melf0 の mel(parallel_wavegan.bin.preprocess.logmelfilterbank)と一致
+                     (librosa.stft の center=True + reflect pad, hann(win) を n_fft 中央に置く,
+                     log10 clamp 1e-10)。フレーム数は 1 + T // hop。
+    """
     if wav.dim() == 3:
         wav = wav.squeeze(1)
-    window = torch.hann_window(win, device=wav.device)
+    window = torch.hann_window(win, device=wav.device, dtype=wav.dtype)
+    mb = _mel_basis_cached(sr, n_fft, n_mels, fmin, fmax).to(wav.device, wav.dtype)
+    if mel_format == 'nnsvs':
+        S = torch.stft(wav, n_fft, hop, win, window, center=True, pad_mode='reflect',
+                       return_complex=True)
+        # abs の勾配は 0 で 0(sgn(0)=0)。diffsinger 版の eps を入れると無音側の値が
+        # log10 の下限(1e-10)よりずっと上に持ち上がり、入力 mel と合わなくなる。
+        mag = S.abs()                                     # [B, freq, frame]
+        return torch.log10(torch.clamp(torch.matmul(mb, mag), min=NNSVS_MEL_EPS))
+    if mel_format != 'diffsinger':
+        raise ValueError(f"unknown mel_format: {mel_format}")
     pad = (n_fft - hop) // 2
     w = torch.nn.functional.pad(wav.unsqueeze(1), (pad, pad), mode='reflect').squeeze(1)
     S = torch.stft(w, n_fft, hop, win, window, center=False, return_complex=True)
     # eps を入れて padding 部(0→stft=0)の 0/0 微分(勾配 NaN)を回避(mel_loss 由来)。
     mag = torch.sqrt(S.real ** 2 + S.imag ** 2 + 1e-7)   # [B, freq, frame]
-    mb = _mel_basis_cached(sr, n_fft, n_mels, fmin, fmax).to(wav.device)
     return torch.log(torch.clamp(torch.matmul(mb, mag), min=1e-5))  # [B, n_mels, frame] (ln)
 
 
 def mel_loss(wav_gen: Tensor, target_mel: Tensor, sr: int, n_fft: int, hop: int,
              win: int, n_mels: int, fmin: float, fmax: float,
-             mask: Tensor = None) -> Tensor:
-    """生成波形の diffsinger mel と target_mel(入力 log_melspc)の L1 loss。
+             mask: Tensor = None, mel_format: str = 'diffsinger',
+             floor: Optional[float] = None) -> Tensor:
+    """生成波形の mel と target_mel(入力 log_melspc)の L1 loss。
     mel 計算は wav_to_mel_torch(preprocess と一致)に委譲。
     NSF-HiFiGAN/SingingVocoders 流の主再構成 loss。
 
     Args:
         wav_gen: [B, 1, T] 生成波形(target wav と同スケール)
         target_mel: [B, T_frames, n_mels] or [B, n_mels, T_frames] 入力 log_melspc
+        mel_format: wav_to_mel_torch を参照。target_mel と同じ形式にすること。
+        floor: 指定すると生成側・正解側とも log-mel をこの値で下から切ってから比べる。
+            nnsvs 形式(log10 下限 1e-10)では、ほぼ無音の帯域(44.1kHz 素材の 22kHz 以上など)の
+            値の違いまで L1 に乗ってしまうので、diffsinger 形式の clamp 1e-5 と同じ役目をさせる。
     Returns:
-        loss: []  (L1, mel 値域 -6〜1.5 スケール)
+        loss: []  (L1)
     """
-    mel = wav_to_mel_torch(wav_gen, sr, n_fft, hop, win, n_mels, fmin, fmax)  # [B, n_mels, frame]
+    mel = wav_to_mel_torch(wav_gen, sr, n_fft, hop, win, n_mels, fmin, fmax,
+                           mel_format)                  # [B, n_mels, frame]
     if target_mel.size(1) != n_mels:          # [B, T, n_mels] -> [B, n_mels, T]
         target_mel = target_mel.transpose(1, 2)
+    if floor is not None:
+        mel = torch.clamp(mel, min=floor)
+        target_mel = torch.clamp(target_mel, min=floor)
     T = min(mel.size(-1), target_mel.size(-1))
     diff = (mel[..., :T] - target_mel[..., :T]).abs()  # [B, n_mels, T]
     if mask is not None:
@@ -298,7 +327,6 @@ def mel_loss(wav_gen: Tensor, target_mel: Tensor, sr: int, n_fft: int, hop: int,
     return diff.mean()
 
 
-@torch.jit.script
 def reshape_zeros_like(x: Tensor, dim: int, length: int) -> Tensor:
     """Return torch.zeros_like(x), while change shape of the `dim` dimension."""
     shape = list(x.shape)

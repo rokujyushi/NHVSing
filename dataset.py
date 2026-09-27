@@ -13,16 +13,22 @@ class VocoderDataset(Dataset):
         dataset_dir (str or Path): Root directory containing the .npz files.
         augment (bool): If True, apply random amplitude augmentation (training only).
         amp_aug_range (tuple): (min, max) linear amplitude scale. Default (0.5, 2.0).
+        mel_format (str, optional): 'nnsvs'(log10 mel)/ 'diffsinger'(ln mel)。None なら
+            diffsinger_mel に従う(True='diffsinger', False=V2 の power_to_db)。
     """
     def __init__(self, dataset_dir: str, hop_size: int, validate: bool = False,
                  augment: bool = False, amp_aug_range: tuple = (0.5, 2.0),
-                 diffsinger_mel: bool = False):
+                 diffsinger_mel: bool = False, mel_format: str = None):
         self.dataset_path = Path(dataset_dir)
         self.hop_size = hop_size
         self.augment = augment
         # V3: ln-magnitude mel(OpenUtau/pc_nsf)のとき amp 補正は +ln(alpha)。
         # 既定 False は V2 互換 (power_to_db, +20*log10(alpha))。
         self.diffsinger_mel = diffsinger_mel
+        if mel_format is None:
+            mel_format = 'diffsinger' if diffsinger_mel else 'power_db'
+        assert mel_format in ('nnsvs', 'diffsinger', 'power_db'), mel_format
+        self.mel_format = mel_format
         self.amp_aug_log_min = np.log(amp_aug_range[0])
         self.amp_aug_log_max = np.log(amp_aug_range[1])
         # .rglob("*.npz") を使ってサブディレクトリ内も再帰的に検索
@@ -36,7 +42,8 @@ class VocoderDataset(Dataset):
         n_bad = 0
         n_silent = 0
         n_unvoiced = 0
-        SILENT_MEL_MAX = -9.2  # ln-mel(OpenUtau/pc_nsf): log10 の -4.0 相当(×2.3026)。mel max がこれ未満は無音
+        # mel max がこれ未満は無音。ln-mel(OpenUtau/pc_nsf)は -9.2、log10-mel(nnsvs)は同じ値の -4.0。
+        SILENT_MEL_MAX = -4.0 if mel_format == 'nnsvs' else -9.2
         for p in self.file_paths:
             try:
                 f = np.load(p)
@@ -107,7 +114,11 @@ class VocoderDataset(Dataset):
                 # 振幅 alpha 倍 → mel の log 補正:
                 #   V2 power_to_db (10*log10(power), power∝alpha²) → +20*log10(alpha)
                 #   V3 ln-magnitude (magnitude∝alpha, OpenUtau/pc_nsf) → +1*ln(alpha)
-                if self.diffsinger_mel:
+                #   nnsvs log10-magnitude (magnitude∝alpha) → +log10(alpha)
+                #   (下限 eps に張り付いた値もずれるが、そこは mel_loss_floor の下なので影響しない)
+                if self.mel_format == 'nnsvs':
+                    log_melspc = log_melspc + np.log10(alpha)          # log10-mel
+                elif self.mel_format == 'diffsinger':
                     log_melspc = log_melspc + np.log(alpha)            # ln-mel
                 else:
                     log_melspc = log_melspc + 20.0 * np.log10(alpha)   # V2 power_to_db
