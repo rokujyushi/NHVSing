@@ -17,7 +17,7 @@ import matplotlib.pylab as plt
 import soundfile as sf
 import librosa
 
-from dataset import VocoderDataset, collate_fn_padd, norm_interp_f0
+from dataset import VocoderDataset, collate_fn_padd, norm_interp_f0, RandomCropCollate
 from nhvsing.model import NHVSing, NHVSingV2, NHVSingV3, NHVSingV3X, select_model_class
 from discriminator import DiscriminatorWithComplexSTFT
 from nhvsing.dsp import stft_loss as stft_loss_fn, envelope_loss as envelope_loss_fn, mel_loss as mel_loss_fn, wav_to_mel_torch
@@ -90,44 +90,8 @@ def make_random_crop_collate(crop_frames, hop_size: int, min_crop_rms: float = 0
     if crop_frames is None:
         return collate_fn_padd
 
-    crop_samples = crop_frames * hop_size
-
-    def random_crop_collate(batch):
-        cropped = []
-        for (f0, melspc, wav, uv) in batch:
-            T = melspc.shape[0]
-            if T < crop_frames:
-                pad_f = crop_frames - T
-                f0 = np.pad(f0, ((0, 0), (0, pad_f)))
-                uv = np.pad(uv, ((0, 0), (0, pad_f)))
-                melspc = np.pad(melspc, ((0, pad_f), (0, 0)))
-                wav = np.pad(wav, (0, crop_samples - wav.shape[0]))
-                s = 0
-            elif min_crop_rms <= 0.0:
-                s = np.random.randint(0, T - crop_frames + 1)
-            else:
-                # Reject near-silent crops: take the first crop with rms >= min_crop_rms; if all
-                # max_crop_tries draws fail, keep the loudest candidate (never drop the item).
-                s = np.random.randint(0, T - crop_frames + 1)
-                best_s, best_rms = s, -1.0
-                for _ in range(max_crop_tries):
-                    ss = s * hop_size
-                    seg = wav[ss:ss + crop_samples]
-                    rms = float(np.sqrt(np.mean(seg.astype(np.float64) ** 2))) if seg.size else 0.0
-                    if rms >= min_crop_rms:
-                        best_s = s
-                        break
-                    if rms > best_rms:
-                        best_s, best_rms = s, rms
-                    s = np.random.randint(0, T - crop_frames + 1)
-                s = best_s
-            e = s + crop_frames
-            ss = s * hop_size
-            se = ss + crop_samples
-            cropped.append((f0[:, s:e], melspc[s:e, :], wav[ss:se], uv[:, s:e]))
-        return collate_fn_padd(cropped)
-
-    return random_crop_collate
+    # Windows(spawn)の DataLoader worker へ渡せるよう、モジュール直下のクラス(dataset.py)にしてある。
+    return RandomCropCollate(crop_frames, hop_size, min_crop_rms, max_crop_tries)
 
 
 class NaNDetected(Exception):

@@ -271,3 +271,52 @@ def get_mask_from_lengths(lengths):
     ids = torch.arange(0, max_len).unsqueeze(0).expand(batch_size, -1)
     mask = (ids >= lengths.unsqueeze(1).expand(-1, max_len))
     return mask
+
+
+class RandomCropCollate:
+    """train_v3.make_random_crop_collate の本体(固定長ランダムクロップ。説明はそちら)。
+    Windows の DataLoader は worker を spawn で起動し collate_fn を pickle で渡すので、
+    関数内の閉包ではなくモジュール直下のクラスにしている。"""
+
+    def __init__(self, crop_frames: int, hop_size: int, min_crop_rms: float = 0.0,
+                 max_crop_tries: int = 10):
+        self.crop_frames = crop_frames
+        self.hop_size = hop_size
+        self.crop_samples = crop_frames * hop_size
+        self.min_crop_rms = min_crop_rms
+        self.max_crop_tries = max_crop_tries
+
+    def __call__(self, batch):
+        cropped = []
+        for (f0, melspc, wav, uv) in batch:
+            T = melspc.shape[0]
+            if T < self.crop_frames:
+                pad_f = self.crop_frames - T
+                f0 = np.pad(f0, ((0, 0), (0, pad_f)))
+                uv = np.pad(uv, ((0, 0), (0, pad_f)))
+                melspc = np.pad(melspc, ((0, pad_f), (0, 0)))
+                wav = np.pad(wav, (0, self.crop_samples - wav.shape[0]))
+                s = 0
+            elif self.min_crop_rms <= 0.0:
+                s = np.random.randint(0, T - self.crop_frames + 1)
+            else:
+                # Reject near-silent crops: take the first crop with rms >= min_crop_rms; if all
+                # max_crop_tries draws fail, keep the loudest candidate (never drop the item).
+                s = np.random.randint(0, T - self.crop_frames + 1)
+                best_s, best_rms = s, -1.0
+                for _ in range(self.max_crop_tries):
+                    ss = s * self.hop_size
+                    seg = wav[ss:ss + self.crop_samples]
+                    rms = float(np.sqrt(np.mean(seg.astype(np.float64) ** 2))) if seg.size else 0.0
+                    if rms >= self.min_crop_rms:
+                        best_s = s
+                        break
+                    if rms > best_rms:
+                        best_s, best_rms = s, rms
+                    s = np.random.randint(0, T - self.crop_frames + 1)
+                s = best_s
+            e = s + self.crop_frames
+            ss = s * self.hop_size
+            se = ss + self.crop_samples
+            cropped.append((f0[:, s:e], melspc[s:e, :], wav[ss:se], uv[:, s:e]))
+        return collate_fn_padd(cropped)

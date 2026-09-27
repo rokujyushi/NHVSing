@@ -149,7 +149,8 @@ def process_file(args):
 
 def main():
     ap = argparse.ArgumentParser(description='NHVSing preprocess for nnsvs melf0 (harvest F0, log10 mel)')
-    ap.add_argument('--indir', required=True, nargs='+', help='wav の入ったディレクトリ(再帰探索。複数可)')
+    ap.add_argument('--indir', required=True, nargs='+',
+                    help='wav の入ったディレクトリ(再帰探索)か wav ファイル。複数可')
     ap.add_argument('--out', required=True, help='shard npz の出力先')
     ap.add_argument('--config', default='config_nnsvs_48k.yaml')
     ap.add_argument('--exclude', nargs='*', default=['.lbp.caches'],
@@ -168,8 +169,8 @@ def main():
 
     wavs = []
     for d in args.indir:
-        wavs += [p for p in glob.glob(os.path.join(d, '**', '*.wav'), recursive=True)
-                 if not any(ex in p for ex in args.exclude)]
+        cands = [d] if os.path.isfile(d) else glob.glob(os.path.join(d, '**', '*.wav'), recursive=True)
+        wavs += [p for p in cands if not any(ex in p for ex in args.exclude)]
     wavs = sorted(set(wavs))
     print(f"{len(wavs)} wav files -> {args.out} ({cfg['sample_rate']}Hz hop{cfg['hop_size']} "
           f"{cfg['mel_dim']}mel {cfg['mel_min']:g}-{cfg['mel_max']:g}Hz log10, "
@@ -189,7 +190,11 @@ def main():
             nskip += ns
             for sid, f0, mel, wav in segs:
                 if sid in seen:                     # 別フォルダに同名 wav があるとき
-                    sid = f'{os.path.basename(os.path.dirname(path))}_{sid}'
+                    base, k = f'{os.path.basename(os.path.dirname(path))}_{sid}', 1
+                    sid = base
+                    while sid in seen:
+                        k += 1
+                        sid = f'{base}_{k}'
                 seen.add(sid)
                 if args.segs_per_shard <= 0:
                     np.savez_compressed(os.path.join(args.out, f'{sid}.npz'),
