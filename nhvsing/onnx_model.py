@@ -1,6 +1,6 @@
 import torch
 import torch.nn as nn
-from layers import ConvLayers
+from .layers import ConvLayers
 
 
 def _make_quef_norm(ccep_size: int, alpha: float) -> torch.Tensor:

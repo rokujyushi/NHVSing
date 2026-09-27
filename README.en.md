@@ -155,7 +155,7 @@ By default this writes to `exported_models/v3/`:
 
 **Inference (Python)**:
 ```python
-from nhv_vocoder import NHVVocoder
+from nhvsing.nhv_vocoder import NHVVocoder
 voc = NHVVocoder('weights.ckpt', 'config_v3.yaml')      # V3/V3X auto-selected via config use_v3x
 cf0, uv = NHVVocoder.prep_f0(f0_hz)                       # raw F0 (0=unvoiced) → continuous F0 + uv
 wav = voc.infer(mel, cf0, uv)                            # mel: [T, 128] ln-mel

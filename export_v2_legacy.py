@@ -5,9 +5,9 @@ import torch
 import torch.nn as nn
 import onnx
 
-from model import NHVSingV2
-from onnx_model import NHVConvsShared
-from layers import F0Embedder
+from nhvsing.model import NHVSingV2
+from nhvsing.onnx_model import NHVConvsShared
+from nhvsing.layers import F0Embedder
 from dsp_rebuild.impulse_train_onnx import GenerateImpulseTrainONNX
 from dsp_rebuild.complex_cepstrum_to_imp_onnx import ComplexCepstrumToImpONNX
 from dsp_rebuild.ltv_fir_onnx import LTVFirONNX

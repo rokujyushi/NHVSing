@@ -1,0 +1,14 @@
+LICENSE
+README.md
+pyproject.toml
+nhvsing/__init__.py
+nhvsing/dsp.py
+nhvsing/layers.py
+nhvsing/model.py
+nhvsing/nhv_vocoder.py
+nhvsing/onnx_model.py
+nhvsing.egg-info/PKG-INFO
+nhvsing.egg-info/SOURCES.txt
+nhvsing.egg-info/dependency_links.txt
+nhvsing.egg-info/requires.txt
+nhvsing.egg-info/top_level.txt

@@ -1,0 +1,17 @@
+torch
+numpy
+librosa
+PyYAML
+
+[export]
+onnx
+onnxruntime
+
+[train]
+torchaudio
+scipy
+soundfile
+matplotlib
+tqdm
+tensorboard
+pyworld

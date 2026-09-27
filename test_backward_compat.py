@@ -15,7 +15,7 @@ import numpy as np
 import torch
 import yaml
 
-from model import NHVSing, NHVSingV2, NHVSingV3, NHVSingV3X, select_model_class
+from nhvsing.model import NHVSing, NHVSingV2, NHVSingV3, NHVSingV3X, select_model_class
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 B, T = 2, 64

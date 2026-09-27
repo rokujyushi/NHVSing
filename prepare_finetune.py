@@ -27,7 +27,7 @@ import torch
 import yaml
 
 from discriminator import DiscriminatorWithComplexSTFT
-from model import NHVSing, NHVSingV2
+from nhvsing.model import NHVSing, NHVSingV2
 
 
 def load_config(path: str) -> dict:

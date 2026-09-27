@@ -1,6 +1,6 @@
 """NHVSing 推論ラッパ — ckpt + config から mel/f0/uv → wav。
 
-    from nhv_vocoder import NHVVocoder
+    from nhvsing.nhv_vocoder import NHVVocoder
     voc = NHVVocoder('weights.ckpt', 'config_v3.yaml', device='cpu')
     cf0, uv = NHVVocoder.prep_f0(f0_raw_hz)     # 0=無声 の生 F0 → 連続 F0 + uv
     wav = voc.infer(mel, cf0, uv)               # mel:[T, mel_dim] ln-mel
@@ -12,12 +12,13 @@ import numpy as np
 import torch
 import yaml
 
-from model import select_model_class
+from .model import select_model_class
 
 
 class NHVVocoder:
     def __init__(self, ckpt_path: str, config_path: str, device: str = 'cpu'):
-        cfg = yaml.safe_load(open(config_path))
+        with open(config_path, encoding='utf-8') as f:
+            cfg = yaml.safe_load(f)
         vc, lc = cfg['model']['vocoder'], cfg['model']['ltv_filter']
         self.device = torch.device(device)
         self.sample_rate = int(vc['sample_rate'])

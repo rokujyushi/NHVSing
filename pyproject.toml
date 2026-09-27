@@ -1,0 +1,40 @@
+[build-system]
+requires = ["setuptools>=64"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "nhvsing"
+version = "0.1.0"
+description = "Neural Homomorphic Vocoder tuned for singing voice synthesis"
+readme = "README.md"
+license = { text = "MIT" }
+requires-python = ">=3.10"
+# 推論(nhvsing パッケージ)に要るものだけ。学習・前処理・書き出しは extras で入れる。
+dependencies = [
+    "torch",
+    "numpy",
+    "librosa",
+    "PyYAML",
+]
+
+[project.optional-dependencies]
+train = [
+    "torchaudio",
+    "scipy",
+    "soundfile",
+    "matplotlib",
+    "tqdm",
+    "tensorboard",
+    "pyworld",
+]
+export = [
+    "onnx",
+    "onnxruntime",
+]
+
+[project.urls]
+Homepage = "https://github.com/rokujyushi/NHVSing"
+Upstream = "https://github.com/wavtechyukky/NHVSing"
+
+[tool.setuptools]
+packages = ["nhvsing"]

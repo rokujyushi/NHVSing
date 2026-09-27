@@ -3,9 +3,9 @@ import torch
 import torch.nn as nn
 from torch.nn.utils import parametrize, parametrizations
 
-from onnx_model import NHVConvsONNX, NHVConvsShared
-from layers import F0Embedder
-from dsp import (generate_impulse_train, generate_impulse_train_v3beta,
+from .onnx_model import NHVConvsONNX, NHVConvsShared
+from .layers import F0Embedder
+from .dsp import (generate_impulse_train, generate_impulse_train_v3beta,
                  complex_cepstrum_to_imp, ltv_fir, hann_ltv_fir)
 
 

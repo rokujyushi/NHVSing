@@ -17,9 +17,9 @@ import soundfile as sf
 import librosa
 
 from dataset import VocoderDataset, collate_fn_padd, norm_interp_f0
-from model import NHVSing, NHVSingV2
+from nhvsing.model import NHVSing, NHVSingV2
 from discriminator import DiscriminatorWithComplexSTFT
-from dsp import stft_loss as stft_loss_fn, envelope_loss as envelope_loss_fn
+from nhvsing.dsp import stft_loss as stft_loss_fn, envelope_loss as envelope_loss_fn
 import glob
 
 

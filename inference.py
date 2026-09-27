@@ -11,7 +11,7 @@ import librosa
 import onnxruntime as ort
 
 from dataset import norm_interp_f0
-from model import NHVSing, NHVSingV2, repeat_interpolate
+from nhvsing.model import NHVSing, NHVSingV2, repeat_interpolate
 
 
 def _active_rms(y: np.ndarray, silence_thresh_db: float = -40.0) -> float:

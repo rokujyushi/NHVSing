@@ -1,3 +1,30 @@
+Metadata-Version: 2.4
+Name: nhvsing
+Version: 0.1.0
+Summary: Neural Homomorphic Vocoder tuned for singing voice synthesis
+License: MIT
+Project-URL: Homepage, https://github.com/rokujyushi/NHVSing
+Project-URL: Upstream, https://github.com/wavtechyukky/NHVSing
+Requires-Python: >=3.10
+Description-Content-Type: text/markdown
+License-File: LICENSE
+Requires-Dist: torch
+Requires-Dist: numpy
+Requires-Dist: librosa
+Requires-Dist: PyYAML
+Provides-Extra: train
+Requires-Dist: torchaudio; extra == "train"
+Requires-Dist: scipy; extra == "train"
+Requires-Dist: soundfile; extra == "train"
+Requires-Dist: matplotlib; extra == "train"
+Requires-Dist: tqdm; extra == "train"
+Requires-Dist: tensorboard; extra == "train"
+Requires-Dist: pyworld; extra == "train"
+Provides-Extra: export
+Requires-Dist: onnx; extra == "export"
+Requires-Dist: onnxruntime; extra == "export"
+Dynamic: license-file
+
 [日本語](./README.md) | [English](./README.en.md)
 
 # NHV-Sing

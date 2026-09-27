@@ -38,7 +38,7 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 
 from preprocess import make_mel_fn, active_rms, clean_jumps
-from nhv_vocoder import NHVVocoder
+from nhvsing.nhv_vocoder import NHVVocoder
 
 AUDIO_V3 = _REPO / "docs" / "audio_v3"
 OUT_DIR = _REPO / "docs" / "audio_v3_1"

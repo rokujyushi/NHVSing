@@ -12,7 +12,7 @@ import numpy as np
 import torch
 import yaml
 
-from model import NHVSingV3
+from nhvsing.model import NHVSingV3
 from export import FullVocoderV3, FullVocoderV3X, load_core
 
 
