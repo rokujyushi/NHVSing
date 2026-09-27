@@ -65,3 +65,8 @@ temp/
 # Training result folders (e.g. kiritan_1000epoch/)
 *epoch/
 
+
+# Package build outputs
+build/
+dist/
+*.egg-info/
