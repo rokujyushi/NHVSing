@@ -94,7 +94,7 @@ training:
   inference_output_dir: 'dataset/inference'
   snapshot_path: None                 # ckpt to resume from (None = fresh training)
   max_samples_per_epoch: 999999       # max segments per epoch (set to the real segment count for one pass)
-  gradient_accumulation_steps: 1
+  gradient_accumulation_steps: 2
   shuffle: true
   save_interval: 10
   nan_restart_until_epoch: 10
@@ -125,7 +125,7 @@ training:
   gen_grad_clip: 200.0
   crop_frames: 64               # 64*240 = 15360 samp = 320ms random crop
   min_crop_rms: 0.02            # ★reject near-silent crops in the loader (0 = disabled)
-  batch_size: 32                # fits a 16GB GPU (256 in config_v3_2.yaml; 64 spills to shared memory)
+  batch_size: 16                # x gradient_accumulation_steps 2 = 32. 32 in one pass fits 16GB until the envelope loss starts (ep200), then spills to shared memory
   num_workers: 4
   amp_augment: true
   amp_aug_range: [0.5, 2.0]
