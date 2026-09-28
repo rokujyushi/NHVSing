@@ -899,6 +899,10 @@ def run(args, force_restart: bool = False):
         logged_real_mels.add(_bn)
 
     for epoch in range(start_epoch, cfg['training']['n_epoch']):
+        # pitch_aug でバッチ長が毎回変わり、CUDA のキャッシュが断片化して増え続ける。16GB の GPU では
+        # 数十エポックで共有メモリへあふれて 10 倍以上遅くなったので、エポックごとに手放す。
+        if device.type == 'cuda':
+            torch.cuda.empty_cache()
         # Noise branch unfreeze
         if freeze_until > 0 and epoch == freeze_until:
             model.convs_onnx.conv_noise.requires_grad_(True)
